@@ -1,4 +1,5 @@
 Attribute VB_Name = "XMLConverter"
+'Attribute VB_Name = "XMLConverter"
 ''
 ' VBA-XML v0.0.0
 ' (c) Tim Hall - https://github.com/VBA-tools/VBA-XML
@@ -11,29 +12,27 @@ Attribute VB_Name = "XMLConverter"
 ' ParseXML(<messages><message id="1">A</message><message id="2">B</message></messages>) ->
 '
 ' {Dictionary}
-' - nodeName: {String} "#document"
-' - attributes: {Collection} (Nothing)
-' - childNodes: {Collection}
+' - _nodeName: {String} "#document"
+' - _attributes: {Dictionary - was Collection} (Nothing)
+' - _childNodes: {Collection}
 '   {Dictionary}
-'   - nodeName: "messages"
-'   - attributes: (empty)
-'   - childNodes:
+'   - _nodeName: "messages"
+'   - _attributes: (empty)
+'   - _childNodes: {Collection}
 '     {Dictionary}
-'     - nodeName: "message"
-'     - attributes:
-'       {Collection of Dictionary}
-'       nodeName: "id"
-'       text: "1"
-'     - childNodes: (empty)
-'     - text: A
+'      - _nodeName: "message"
+'      - _attributes:
+'        {Dictionary - was Collection of Dictionary}
+'        "id": "1"
+'      - _childNodes: (empty)
+'      - _text: A
 '     {Dictionary}
-'     - nodeName: "message"
-'     - attributes:
-'       {Collection of Dictionary}
-'       nodeName: "id"
-'       text: "2"
-'     - childNodes: (empty)
-'     - text: B
+'      - _nodeName: "message"
+'      - _attributes:
+'        {Dictionary - was Collection of Dictionary}
+'        "id": "2"
+'      - _childNodes: (empty)
+'      - _text: B
 '
 ' Errors:
 ' 10101 - XML parse error
@@ -44,18 +43,20 @@ Attribute VB_Name = "XMLConverter"
 ' @author: tim.hall.engr@gmail.com
 ' @license: MIT (http://www.opensource.org/licenses/mit-license.php
 '
+' Additions by sebastien.kirche@free.fr
 ' ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ '
+Option Explicit
 
 #If Mac Then
 #ElseIf VBA7 Then
 
-Private Declare PtrSafe Sub json_CopyMemory Lib "kernel32" Alias "RtlMoveMemory" _
-    (json_MemoryDestination As Any, json_MemorySource As Any, ByVal json_ByteLength As Long)
+Private Declare PtrSafe Sub xml_CopyMemory Lib "kernel32" Alias "RtlMoveMemory" _
+    (xml_MemoryDestination As Any, xml_MemorySource As Any, ByVal xml_ByteLength As Long)
 
 #Else
 
-Private Declare Sub json_CopyMemory Lib "kernel32" Alias "RtlMoveMemory" _
-    (json_MemoryDestination As Any, json_MemorySource As Any, ByVal json_ByteLength As Long)
+Private Declare Sub xml_CopyMemory Lib "kernel32" Alias "RtlMoveMemory" _
+    (xml_MemoryDestination As Any, xml_MemorySource As Any, ByVal xml_ByteLength As Long)
 
 #End If
 
@@ -81,18 +82,19 @@ Public Function ParseXml(ByVal xml_String As String) As Dictionary
     xml_SkipSpaces xml_String, xml_Index
     If VBA.Mid$(xml_String, xml_Index, 1) <> "<" Then
         ' Error: Invalid XML string
-        Err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '<'")
+        err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '<'")
     Else
         Set ParseXml = New Dictionary
-        ParseXml.Add "prolog", xml_ParseProlog(xml_String, xml_Index)
-        ParseXml.Add "doctype", xml_ParseDoctype(xml_String, xml_Index)
+        ParseXml.Add "_prolog", xml_ParseProlog(xml_String, xml_Index)
+        ParseXml.Add "_doctype", xml_ParseDoctype(xml_String, xml_Index)
         
-        ParseXml.Add "nodeName", "#document"
-        ParseXml.Add "attributes", Nothing
+        ParseXml.Add "_nodeName", "#document"
+        ParseXml.Add "_attributes", Nothing
         
         Dim xml_ChildNodes As New Collection
         xml_ChildNodes.Add xml_ParseNode(ParseXml, xml_String, xml_Index)
-        ParseXml.Add "childNodes", xml_ChildNodes
+        ParseXml.Add "_childNodes", xml_ChildNodes
+        ParseXml.Add xml_ChildNodes(1)("_nodeName"), xml_ChildNodes(1) ' allow direct access to root element
     End If
 End Function
 
@@ -131,7 +133,7 @@ Private Function xml_ParseProlog(xml_String As String, ByRef xml_Index As Long) 
             xml_Chars = VBA.Mid$(xml_String, xml_Index, 2)
             
             If xml_Index + 1 > xml_StringLength Then
-                Err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '?>'")
+                err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '?>'")
             ElseIf xml_OpeningLevel = 0 And xml_Chars = "?>" Then
                 xml_Index = xml_Index + 2
                 Exit Do
@@ -168,7 +170,7 @@ Private Function xml_ParseDoctype(xml_String As String, ByRef xml_Index As Long)
             xml_Index = xml_Index + 1
             
             If xml_Index > xml_StringLength Then
-                Err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '>'")
+                err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '>'")
             ElseIf xml_OpeningLevel = 0 And xml_Char = ">" Then
                 Exit Do
             ElseIf xml_Char = "<" Then
@@ -185,23 +187,25 @@ End Function
 Private Function xml_ParseNode(xml_Parent As Dictionary, xml_String As String, ByRef xml_Index As Long) As Dictionary
     Dim xml_StartIndex As Long
     Dim xml_Char As String
+    Dim xml_Children As Collection
     Dim xml_StringLength As Long
+    Dim xml_elementName As String, xml_closingElement As String
 
     xml_SkipSpaces xml_String, xml_Index
     If VBA.Mid$(xml_String, xml_Index, 1) <> "<" Then
-        Err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '<'")
+        err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '<'")
     Else
         ' Skip opening bracket
         xml_Index = xml_Index + 1
         
         ' Initialize node
         Set xml_ParseNode = New Dictionary
-        xml_ParseNode.Add "parentNode", xml_Parent
-        xml_ParseNode.Add "attributes", New Collection
-        xml_ParseNode.Add "childNodes", New Collection
-        xml_ParseNode.Add "text", ""
-        xml_ParseNode.Add "firstChild", Nothing
-        xml_ParseNode.Add "lastChild", Nothing
+        xml_ParseNode.Add "_parentNode", xml_Parent
+        xml_ParseNode.Add "_attributes", New Dictionary 'Collection
+        xml_ParseNode.Add "_childNodes", New Collection
+        xml_ParseNode.Add "_text", ""
+        xml_ParseNode.Add "_firstChild", Nothing
+        xml_ParseNode.Add "_lastChild", Nothing
         
         ' 1. Parse nodeName
         xml_SkipSpaces xml_String, xml_Index
@@ -209,11 +213,13 @@ Private Function xml_ParseNode(xml_Parent As Dictionary, xml_String As String, B
         xml_StringLength = Len(xml_String)
         
         Do
+            DoEvents
             xml_Char = VBA.Mid$(xml_String, xml_Index, 1)
             
             Select Case xml_Char
             Case " ", ">", "/"
-                xml_ParseNode.Add "nodeName", VBA.Mid$(xml_String, xml_StartIndex, xml_Index - xml_StartIndex)
+                xml_elementName = VBA.Mid$(xml_String, xml_StartIndex, xml_Index - xml_StartIndex)
+                xml_ParseNode.Add "_nodeName", xml_elementName
                 
                 ' Skip space
                 If xml_Char = " " Then
@@ -225,7 +231,7 @@ Private Function xml_ParseNode(xml_Parent As Dictionary, xml_String As String, B
             End Select
             
             If xml_Index + 1 > xml_StringLength Then
-                Err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting ' ', '>', or '/>'")
+                err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting ' ', '>', or '/>'")
             End If
         Loop
         
@@ -256,6 +262,24 @@ Private Function xml_ParseNode(xml_Parent As Dictionary, xml_String As String, B
         
         ' 4. Parse childNodes
         xml_ParseChildNodes xml_ParseNode, xml_String, xml_Index
+        
+        'simplify if there is only one child of type text, set it in node
+        Set xml_Children = xml_ParseNode.item("_childNodes")
+        If xml_Children.Count = 1 Then
+            If xml_Children.item(1)("_nodeName") = "#text" Then
+                xml_ParseNode.item("_text") = xml_Children.item(1)("_text")
+                xml_Children.Remove 1
+            End If
+        End If
+        
+        'we should have a closing element else the document is not well-formed
+        xml_closingElement = "</" & xml_elementName & ">"
+        If VBA.Mid$(xml_String, xml_Index, Len(xml_closingElement)) <> xml_closingElement Then
+            err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '" & xml_closingElement & "'")
+        Else
+            xml_Index = xml_Index + Len(xml_closingElement)
+        End If
+        
     End If
 End Function
 
@@ -264,8 +288,7 @@ Private Function xml_ParseAttributes(ByRef xml_Node As Dictionary, xml_String As
     Dim xml_StartIndex As Long
     Dim xml_StringLength As Long
     Dim xml_Quote As String
-    Dim xml_Attributes As New Collection
-    Dim xml_Attribute As Dictionary
+    Dim xml_attributes As New Dictionary ' was a collection but duplicated attributes are not allowed
     Dim xml_Name As String
     Dim xml_Value As String
     
@@ -301,23 +324,12 @@ Private Function xml_ParseAttributes(ByRef xml_Node As Dictionary, xml_String As
                     ' Attribute name was stored, end of attribute value
                     xml_Value = VBA.Mid$(xml_String, xml_StartIndex, xml_Index - xml_StartIndex)
                     
-                    ' Store name, value
-                    Set xml_Attribute = New Dictionary
-                    xml_Attribute.Add "name", xml_Name
-                    xml_Attribute.Add "value", xml_Value
-                    xml_Attributes.Add xml_Attribute
-                Else
-                    ' No name was stored, end of attribute name without value
-                    xml_Name = VBA.Mid$(xml_String, xml_StartIndex, xml_Index - xml_StartIndex)
-                    
-                    ' Stor ename
-                    Set xml_Attribute = New Dictionary
-                    xml_Attribute.Add "name", xml_Name
-                    ' TODO Set value to ""?
-                    xml_Attributes.Add xml_Attribute
+                    ' Store name: value
+                    xml_attributes.Add xml_Name, xml_Value
                 End If
                 
                 If xml_Char = ">" Or xml_Char = "/" Then
+                    xml_Index = xml_Index + 1
                     Exit Do
                 Else
                     xml_Name = ""
@@ -333,16 +345,105 @@ Private Function xml_ParseAttributes(ByRef xml_Node As Dictionary, xml_String As
         End Select
         
         If xml_Index > xml_StringLength Then
-            Err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '>' or '/>'")
+            err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '>' or '/>'")
         End If
     Loop
     
-    Set xml_Node("attributes") = xml_Attributes
+    Set xml_Node("_attributes") = xml_attributes
 End Function
 
 Private Function xml_ParseChildNodes(ByRef xml_Node As Dictionary, xml_String As String, ByRef xml_Index As Long) As Collection
-    ' TODO Set childNodes, text, and other properties on xml_Node
+    Dim xml_Char As String
+    Dim xml_Children As Collection
+    Dim xml_Child As Dictionary
+    Dim xml_StartIndex As Long
+    Dim xml_StringLength As Long
+    Dim xml_ParentClosing As String
+    
+    Set xml_Children = xml_Node("_childNodes")
+    xml_StartIndex = xml_Index
+    xml_StringLength = Len(xml_String)
+    xml_ParentClosing = "</" & xml_Node.item("_nodeName") & ">"
+       
+    Do
+        xml_Char = VBA.Mid$(xml_String, xml_Index, 1)
+        Select Case xml_Char
+            Case "<"
+                ' store the text if any
+                If xml_Index > xml_StartIndex Then
+                    Set xml_Child = New Dictionary
+                    xml_Child.Add "_parentNode", xml_Node
+                    xml_Child.Add "_nodeName", "#text"
+                    xml_Child.Add "_text", VBA.Mid$(xml_String, xml_StartIndex, xml_Index - xml_StartIndex)
+                    xml_Child.Add "_attributes", Nothing
+                    xml_Child.Add "_childNodes", Nothing
+                    
+                    xml_Node.item("_childNodes").Add xml_Child
+                    'xml_addSequencedChild xml_Node, xml_Child
+                    xml_StartIndex = xml_Index
+                End If
+                'closing tag of child ?
+                If VBA.Mid$(xml_String, xml_Index, 2) = "</" Then
+                    ' closing tag check
+                    If VBA.Mid$(xml_String, xml_Index, Len(xml_ParentClosing)) <> xml_ParentClosing Then
+                        err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Unablanced closing tag, expecting '" & xml_ParentClosing & "'")
+                    Else
+                        Exit Function
+                    End If
+                    xml_StartIndex = xml_Index
+                Else
+                    ' child
+                    Set xml_Child = xml_ParseNode(xml_Node, xml_String, xml_Index)
+                    'xml_Children.Add xml_Child
+                    xml_addSequencedChild xml_Node, xml_Child
+                    xml_StartIndex = xml_Index
+                End If
+                
+            Case Else
+                xml_Index = xml_Index + 1
+        End Select
+        If xml_Index > xml_StringLength Then
+            err.Raise 10101, "XMLConverter", xml_ParseErrorMessage(xml_String, xml_Index, "Expecting '<'")
+        End If
+    Loop
+    
 End Function
+
+' Add a child to a parent in its _childNodes collection
+' but add it also in its Dictionary to allow "direct" access
+' the first time we have no way to tell if it will be alone
+' but if the child name is repeated add it as a sequence
+Private Sub xml_addSequencedChild(xml_Node As Dictionary, xml_Child As Dictionary)
+    Dim existingChild As Dictionary
+    Dim last_elem As Long
+    Dim childName As String
+    childName = xml_Child("_nodeName")
+    
+    If xml_Node.Exists("_" & childName & "_last") Then
+        last_elem = xml_Node("_" & childName & "_last")
+        last_elem = last_elem + 1
+        xml_Child.Add "_index", last_elem
+        xml_Node.Add childName & "#" & CStr(last_elem), xml_Child ' add first for direct access
+        xml_Node.item("_childNodes").Add xml_Child ' add in the children collection
+        xml_Node.item("_" & childName & "_last") = last_elem ' keep last index
+    Else
+        If xml_Node.Exists(childName) Then
+            'adding a duplicate
+            Set existingChild = xml_Node(childName)
+            xml_Node.Remove childName ' remove direct access
+            existingChild.Add "_index", 1
+            xml_Node.Add childName & "#" & CStr(1), existingChild ' add previous with new name = rename
+            xml_Child.Add "_index", 2
+            xml_Node.Add childName & "#" & CStr(2), xml_Child ' add first for direct access
+            xml_Node.Add "_" & childName & "_last", 2 ' keep last index
+            xml_Node.item("_childNodes").Add xml_Child ' add in the children collection
+        Else
+            xml_Node.Add childName, xml_Child ' add first for direct access
+            xml_Node.item("_childNodes").Add xml_Child ' add in the children collection
+        End If
+    End If
+
+End Sub
 
 Private Function xml_IsVoidNode(xml_Node As Dictionary) As Boolean
     ' xml_HTML5VoidNodeNames
@@ -363,7 +464,7 @@ End Function
 Private Function xml_RootNode(xml_Node As Dictionary) As Dictionary
     Set xml_RootNode = xml_Node
     Do While Not xml_RootNode.Exists("parentNode")
-        Set xml_RootNode = xml_RootNode("parentNode")
+        Set xml_RootNode = xml_RootNode.item("parentNode")
     Loop
 End Function
 
@@ -389,7 +490,7 @@ Private Function xml_StringIsLargeNumber(xml_String As Variant) As Boolean
         xml_StringIsLargeNumber = True
         
         For i = 1 To xml_Length
-            xml_CharCode = VBA.Asc(VBA.Mid$(xml_String, i, 1))
+            xml_CharCode = VBA.asc(VBA.Mid$(xml_String, i, 1))
             Select Case xml_CharCode
             ' Look for .|0-9|E|e
             Case 46, 48 To 57, 69, 101
@@ -518,3 +619,116 @@ Private Function xml_UnsignedAdd(xml_Start As Long, xml_Increment As Long) As Lo
         xml_UnsignedAdd = (xml_Start + &H80000000) + (xml_Increment + &H80000000)
     End If
 End Function
+
+Sub xml_showNodePart(node As Dictionary, key As String, indentLevel As Integer)
+    Dim indent As String
+    indent = String(indentLevel * 2, " ")
+    
+    If node.Exists(key) Then
+        If node.item(key) <> "" Then
+            Debug.Print indent & "- " & key & ": (" & TypeName(node.item(key)) & ") """ & node(key) & """"
+        End If
+    End If
+End Sub
+Sub xml_showNode(node As Dictionary, Optional indentLevel As Integer = 0)
+    
+    Dim k As Variant
+    Dim i As Long
+    Dim indent As String
+    indent = String(indentLevel * 2, " ")
+    
+    Dim attrs As Dictionary, childs As Collection
+    Debug.Print indent & "{" & TypeName(node) & "}"
+    xml_showNodePart node, "_nodeName", indentLevel
+    xml_showNodePart node, "_text", indentLevel
+    
+    Set attrs = node("_attributes")
+    If Not attrs Is Nothing Then
+        If attrs.Count > 0 Then
+            Debug.Print indent & "- _attributes: {Dictionary} " & attrs.Count & " item(s)"
+            For Each k In attrs.Keys
+                Debug.Print indent & indent & "- """ & k & """: """ & attrs.item(k) & """"
+            Next
+        End If
+    Else
+        Debug.Print indent & "- _attributes: (empty)"
+    End If
+    
+    For Each k In node.Keys
+        Select Case k
+            Case "_nodeName", "_text", "_attributes", "_parentNode", _
+                 "_childNodes", "_firstChild", "_lastChild", "_index"
+                'nothing, ignore this element
+            Case Else:
+                Select Case TypeName(node(k))
+                    Case "Integer", "Long":
+                        Debug.Print indent & "- " & k & " (" & TypeName(node(k)) & ") " & CStr(node(k))
+                    Case Else:
+                        Debug.Print indent & "- " & k & " (" & TypeName(node(k)) & ")"
+                    End Select
+        End Select
+    Next
+    
+    Set childs = node("_childNodes")
+    If Not childs Is Nothing Then
+        If childs.Count > 0 Then
+            Debug.Print indent & "- _childNodes: {Collection} " & childs.Count & " item(s)"
+            If childs.Count > 0 Then
+                For i = 1 To childs.Count
+                    xml_showNode childs.item(i), indentLevel + 1
+                Next
+            End If
+        End If
+    Else
+        Debug.Print indent & "- _childNodes: (empty)"
+    End If
+End Sub
+
+Sub xml_testLib()
+    Dim d As Dictionary
+    Set d = New Dictionary
+    d.Add "foo", "bar"
+    d.Add "baz", 42
+    
+    Debug.Print ConvertToXML(d)
+    
+    Dim x As String
+    'x = "<foo>sometext</foo>"
+    'x = "<foo><bar>sometext</bar></foo>"
+    'x = "<foo><bar>sometext<other/>text2</bar></foo>"
+    x = "<messages><message id=""1"">A</message><message id=""2"">B</message></messages>"
+    'Set d = ParseXml(x)
+    'xml_showNode d
+    
+    'End
+    
+    Dim XML As Object
+    Set XML = XMLConverter.ParseXml( _
+    "<?xml version=""1.0""?>" & _
+      "<messages>" & _
+        "<message id=""1"" date=""2014-1-1"">" & _
+          "<from><name>Tim Hall</name></from>" & _
+          "<body>Howdy!</body>" & _
+        "</message>" & _
+        "<message id=""2"" date=""2014-1-1"">" & _
+          "<from><name>John Doe</name></from>" & _
+          "<body>Hello, World!<signature>ident1</signature></body>" & _
+        "</message>" & _
+      "</messages>" _
+    )
+
+    xml_showNode XML
+
+    'Debug.Print XML("#document")("nodeName") ' -> "messages"
+    Debug.Print XML("_childNodes")(1)("_childNodes")(1)("_attributes")("id") ' -> "1"
+    Debug.Print XML("messages")("message#1")("_attributes")("id")
+    Debug.Print XML("_childNodes")(1)("_childNodes")(1)("_attributes")("date") ' -> "2014-1-1"
+    Debug.Print XML("messages")("message#2")("_attributes")("date")
+    Debug.Print XML("_childNodes")(1)("_childNodes")(1)("_childNodes")(2)("_text") ' -> "Howdy!"
+    'Debug.Print XML("messages")("message")("body")("_text")
+    Debug.Print XML("messages")("message#2")("body")("_childNodes")(1)("_text") ' -> "Hello, World!"
+
+    Debug.Print XMLConverter.ConvertToXML(XML)
+    
+End Sub
+
