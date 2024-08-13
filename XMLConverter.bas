@@ -94,6 +94,7 @@ Public Function ParseXml(ByVal xml_String As String) As Dictionary
         Dim xml_ChildNodes As New Collection
         xml_ChildNodes.Add xml_ParseNode(ParseXml, xml_String, xml_Index)
         ParseXml.Add "_childNodes", xml_ChildNodes
+        ParseXml.Add "#documentElement", xml_ChildNodes(1) ' allow to run as in doc
         ParseXml.Add xml_ChildNodes(1)("_nodeName"), xml_ChildNodes(1) ' allow direct access to root element
     End If
 End Function
@@ -377,6 +378,7 @@ Private Function xml_ParseChildNodes(ByRef xml_Node As Dictionary, xml_String As
                     xml_Child.Add "_text", VBA.Mid$(xml_String, xml_StartIndex, xml_Index - xml_StartIndex)
                     xml_Child.Add "_attributes", Nothing
                     xml_Child.Add "_childNodes", Nothing
+                    xml_Child.Add "_childIndex", xml_Node.item("_childNodes").Count + 1
                     
                     xml_Node.item("_childNodes").Add xml_Child
                     'xml_addSequencedChild xml_Node, xml_Child
@@ -394,6 +396,7 @@ Private Function xml_ParseChildNodes(ByRef xml_Node As Dictionary, xml_String As
                 Else
                     ' child
                     Set xml_Child = xml_ParseNode(xml_Node, xml_String, xml_Index)
+                    xml_Child.Add "_childIndex", xml_Node.item("_childNodes").Count + 1
                     'xml_Children.Add xml_Child
                     xml_addSequencedChild xml_Node, xml_Child
                     xml_StartIndex = xml_Index
@@ -634,6 +637,7 @@ Sub xml_showNode(node As Dictionary, Optional indentLevel As Integer = 0)
     
     Dim k As Variant
     Dim i As Long
+    Dim parentIndex As String
     Dim indent As String
     indent = String(indentLevel * 2, " ")
     
@@ -649,6 +653,8 @@ Sub xml_showNode(node As Dictionary, Optional indentLevel As Integer = 0)
             For Each k In attrs.Keys
                 Debug.Print indent & indent & "- """ & k & """: """ & attrs.item(k) & """"
             Next
+        Else
+            Debug.Print indent & "- _attributes: (empty)"
         End If
     Else
         Debug.Print indent & "- _attributes: (empty)"
@@ -660,11 +666,18 @@ Sub xml_showNode(node As Dictionary, Optional indentLevel As Integer = 0)
                  "_childNodes", "_firstChild", "_lastChild", "_index"
                 'nothing, ignore this element
             Case Else:
+                parentIndex = ""
+                If Left(k, 1) <> "_" Then
+                    If node(k).Exists("_childIndex") Then
+                        parentIndex = " (child index " & node(k)("_childIndex") & ")"
+                    End If
+                End If
+                     
                 Select Case TypeName(node(k))
                     Case "Integer", "Long":
-                        Debug.Print indent & "- " & k & " (" & TypeName(node(k)) & ") " & CStr(node(k))
+                        Debug.Print indent & "- " & k & parentIndex & " {" & TypeName(node(k)) & "} " & CStr(node(k))
                     Case Else:
-                        Debug.Print indent & "- " & k & " (" & TypeName(node(k)) & ")"
+                        Debug.Print indent & "- " & k & parentIndex & " {" & TypeName(node(k)) & "}"
                     End Select
         End Select
     Next
@@ -678,6 +691,8 @@ Sub xml_showNode(node As Dictionary, Optional indentLevel As Integer = 0)
                     xml_showNode childs.item(i), indentLevel + 1
                 Next
             End If
+        Else
+            Debug.Print indent & "- _childNodes: (empty)"
         End If
     Else
         Debug.Print indent & "- _childNodes: (empty)"
@@ -719,13 +734,15 @@ Sub xml_testLib()
 
     xml_showNode XML
 
-    'Debug.Print XML("#document")("nodeName") ' -> "messages"
+    Debug.Print XML("#documentElement")("_nodeName") ' -> "messages"
+    Debug.Print XML("#documentElement")("_childNodes")(1)("_attributes")("id") ' -> "1"
+    Debug.Print XML("#documentElement")("_childNodes")(1)("_childNodes")(2)("_text") ' -> "Howdy!"
+
     Debug.Print XML("_childNodes")(1)("_childNodes")(1)("_attributes")("id") ' -> "1"
-    Debug.Print XML("messages")("message#1")("_attributes")("id")
+    Debug.Print XML("messages")("message#1")("_attributes")("id") ' -> "1"
     Debug.Print XML("_childNodes")(1)("_childNodes")(1)("_attributes")("date") ' -> "2014-1-1"
-    Debug.Print XML("messages")("message#2")("_attributes")("date")
+    Debug.Print XML("messages")("message#2")("_attributes")("date") ' -> "2014-1-1"
     Debug.Print XML("_childNodes")(1)("_childNodes")(1)("_childNodes")(2)("_text") ' -> "Howdy!"
-    'Debug.Print XML("messages")("message")("body")("_text")
     Debug.Print XML("messages")("message#2")("body")("_childNodes")(1)("_text") ' -> "Hello, World!"
 
     Debug.Print XMLConverter.ConvertToXML(XML)
